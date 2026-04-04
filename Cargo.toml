@@ -1,0 +1,8 @@
+[package]
+name = "rust-retro-basic"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.6.0", features = ["derive"] }
+tokio = { version = "1.51.0", features = ["fs", "full", "io-util"] }

@@ -1,0 +1,6 @@
+A = 1
+IF 10 < A 60
+PRINT A
+A = A + 1
+GOTO 20
+STOP
