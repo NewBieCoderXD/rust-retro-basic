@@ -2,16 +2,13 @@ mod code_gen;
 mod parser;
 mod scanner;
 mod token;
+use std::fs;
 use std::path::PathBuf;
-use std::string::ParseError;
-
 use thiserror::Error;
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
-
 use clap::Parser;
 
-use crate::code_gen::CodeGenError;
 
 // fn compile(){
 
@@ -26,7 +23,7 @@ struct Args {
     input: String,
 
     #[arg(short, long)]
-    output: String,
+    output: Option<String>,
 }
 
 async fn process_buffers_and_scan(
@@ -92,7 +89,7 @@ impl From<code_gen::CodeGenError> for CompileError {
     }
 }
 
-async fn compile(input_path: String, output_path: String) -> Result<String, CompileError> {
+async fn compile(input_path: String) -> Result<String, CompileError> {
     let mut state = scanner::ScanState::Start;
     let mut mem = vec![];
     let mut out = vec![];
@@ -101,6 +98,7 @@ async fn compile(input_path: String, output_path: String) -> Result<String, Comp
         .unwrap();
 
     let statements = parser::parse(out)?;
+    println!("{:#?}",statements);
     let code = code_gen::generate(statements)?;
 
     return Ok(code);
@@ -108,7 +106,15 @@ async fn compile(input_path: String, output_path: String) -> Result<String, Comp
 
 #[tokio::main]
 async fn main() {
+  let start = std::time::Instant::now();
     let args = Args::parse();
-    let out_code = compile(args.input, args.output).await;
-    println!("{:?}", out_code);
+    let out_code = compile(args.input).await.unwrap();
+    let duration = start.elapsed();
+    if let Some(out)=args.output{
+      fs::write(out, out_code).unwrap();
+    }
+    else{
+      println!("{}",out_code);
+    }
+    println!("Finished, took {} microseconds.",duration.as_millis())
 }

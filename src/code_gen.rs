@@ -1,6 +1,9 @@
 use thiserror::Error;
 
-use crate::{parser::{self, CondNode, ExpNode, StatementNode}, token};
+use crate::{
+    parser::{self, CondNode, ExpNode, StatementNode},
+    token,
+};
 
 #[repr(u8)]
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -32,56 +35,55 @@ pub enum CodeGenError {
     InvalidOp(token::TokenCompare),
 }
 
-fn add_line(out: &mut Vec<String>, line: u16) {
-    out.push((BCodeIns::LineNum as u8).to_string());
-    out.push(line.to_string());
+fn add_line(out: &mut Vec<Vec<u16>>, line: u16) {
+    out.push(vec![BCodeIns::LineNum as u16, line]);
 }
 
-fn add_iden(out: &mut Vec<String>, iden: String) -> Result<(), CodeGenError> {
+fn add_iden(last_out: &mut Vec<u16>, iden: String) -> Result<(), CodeGenError> {
     if iden.len() != 1 {
         return Err(CodeGenError::InvalidIdentifier(iden));
     }
-    out.push((BCodeIns::Id as u8).to_string());
-    out.push(((iden.chars().next().unwrap() as u32) - ('A' as u32)+1).to_string());
+    last_out.push(BCodeIns::Id as u16);
+    last_out.push(((iden.chars().next().unwrap() as u32) - ('A' as u32) + 1) as u16);
     Ok(())
 }
 
-fn add_op(out: &mut Vec<String>, op: OpCode) -> Result<(), CodeGenError> {
-    out.push((BCodeIns::Op as u8).to_string());
-    out.push((op as u8).to_string());
+fn add_op(last_out: &mut Vec<u16>, op: OpCode) -> Result<(), CodeGenError> {
+    last_out.push(BCodeIns::Op as u16);
+    last_out.push(op as u16);
     Ok(())
 }
 
-fn add_goto(out: &mut Vec<String>, jump: u16) {
-    out.push((BCodeIns::Goto as u8).to_string());
-    out.push(jump.to_string());
+fn add_goto(last_out: &mut Vec<u16>, jump: u16) {
+    last_out.push(BCodeIns::Goto as u16);
+    last_out.push(jump);
 }
 
-fn add_const(out: &mut Vec<String>, val: u8){
-  out.push((BCodeIns::Const as u8).to_string());
-  out.push(val.to_string());
+fn add_const(last_out: &mut Vec<u16>, val: u8) {
+    last_out.push(BCodeIns::Const as u16);
+    last_out.push(val as u16);
 }
 
-fn add_exp_node(out: &mut Vec<String>, exp: &ExpNode) -> Result<(),CodeGenError>{
-  match exp{
-    ExpNode::Term(parser::Term::Var(term)) => {
-      add_iden(out, term.clone())?;
+fn add_exp_node(last_out: &mut Vec<u16>, exp: &ExpNode) -> Result<(), CodeGenError> {
+    match exp {
+        ExpNode::Term(parser::Term::Var(term)) => {
+            add_iden(last_out, term.clone())?;
+        }
+        ExpNode::Term(parser::Term::Number(num)) => {
+            add_const(last_out, *num);
+        }
+        ExpNode::Add(lhs, rhs) => {
+            add_exp_node(last_out, lhs.as_ref())?;
+            add_op(last_out, OpCode::Add)?;
+            add_exp_node(last_out, rhs.as_ref())?;
+        }
+        ExpNode::Sub(lhs, rhs) => {
+            add_exp_node(last_out, lhs.as_ref())?;
+            add_op(last_out, OpCode::Sub)?;
+            add_exp_node(last_out, rhs.as_ref())?;
+        }
     }
-    ExpNode::Term(parser::Term::Number(num)) => {
-      add_const(out, *num);
-    }
-    ExpNode::Add(lhs, rhs) => {
-      add_exp_node(out, lhs.as_ref())?;
-      add_op(out, OpCode::Add)?;
-      add_exp_node(out, rhs.as_ref())?;
-    }
-    ExpNode::Sub(lhs, rhs) => {
-      add_exp_node(out, lhs.as_ref())?;
-      add_op(out, OpCode::Sub)?;
-      add_exp_node(out, rhs.as_ref())?;
-    }
-  }
-  Ok(())
+    Ok(())
 }
 
 // fn add_term(out:&mut Vec<String>, term: &Term){
@@ -95,17 +97,19 @@ fn add_exp_node(out: &mut Vec<String>, exp: &ExpNode) -> Result<(),CodeGenError>
 //   }
 // }
 
-fn add_cond_node(out: &mut Vec<String>, cond: &CondNode) -> Result<(),CodeGenError>{
+fn add_cond_node(last_out: &mut Vec<u16>, cond: &CondNode) -> Result<(), CodeGenError> {
     let op;
-    match cond.op{
-      token::TokenCompare::Equal => {op=OpCode::Equal}
-      token::TokenCompare::MoreThan => {return Err(CodeGenError::InvalidOp(token::TokenCompare::MoreThan))}
-      token::TokenCompare::LessThan => {op=OpCode::LessThan}
+    match cond.op {
+        token::TokenCompare::Equal => op = OpCode::Equal,
+        token::TokenCompare::MoreThan => {
+            return Err(CodeGenError::InvalidOp(token::TokenCompare::MoreThan));
+        }
+        token::TokenCompare::LessThan => op = OpCode::LessThan,
     };
-      add_exp_node(out, &cond.left)?;
-      add_op(out, op)?;
-      add_exp_node(out, &cond.right)?;
-      Ok(())
+    add_exp_node(last_out, &cond.left)?;
+    add_op(last_out, op)?;
+    add_exp_node(last_out, &cond.right)?;
+    Ok(())
 }
 
 pub fn generate(tree: Vec<StatementNode>) -> Result<String, CodeGenError> {
@@ -114,31 +118,48 @@ pub fn generate(tree: Vec<StatementNode>) -> Result<String, CodeGenError> {
         match stmt {
             StatementNode::Assign(line, iden, val) => {
                 add_line(&mut out, line);
-                add_iden(&mut out, iden)?;
-                add_op(&mut out, OpCode::Equal)?;
-                add_exp_node(&mut out, &val)?
+                let last_out = out.last_mut().unwrap();
+                add_iden(last_out, iden)?;
+                add_op(last_out, OpCode::Equal)?;
+                add_exp_node(last_out, &val)?
             }
             StatementNode::If(line, cond, jump) => {
                 add_line(&mut out, line);
-                out.push((BCodeIns::If as u8).to_string());
-                add_cond_node(&mut out, &cond)?;
-                add_goto(&mut out, jump);
+                let last_out = out.last_mut().unwrap();
+                last_out.push(BCodeIns::If as u16);
+                last_out.push(0);
+                add_cond_node(last_out, &cond)?;
+                add_goto(last_out, jump);
             }
             StatementNode::Goto(line, jump) => {
                 add_line(&mut out, line);
-                add_goto(&mut out, jump);
+                let last_out = out.last_mut().unwrap();
+                add_goto(last_out, jump);
             }
             StatementNode::Print(line, var) => {
                 add_line(&mut out, line);
-                out.push((BCodeIns::Print as u8).to_string());
-                out.push(var)
+                let last_out = out.last_mut().unwrap();
+                last_out.push(BCodeIns::Print as u16);
+                last_out.push(0);
+                add_iden(last_out, var)?;
             }
             StatementNode::Stop(line) => {
                 add_line(&mut out, line);
-                out.push((BCodeIns::Stop as u8).to_string());
+                let last_out = out.last_mut().unwrap();
+                last_out.push(BCodeIns::Stop as u16);
+                last_out.push(0);
             }
         }
     }
-    out.push("0".to_owned());
-    Ok(out.join(" "))
+    out.push(vec![0]);
+    Ok(out
+        .iter()
+        .map(|line| {
+            line.iter()
+                .map(|num| num.to_string())
+                .collect::<Vec<String>>()
+                .join(" ")
+        })
+        .collect::<Vec<String>>()
+        .join("\n"))
 }
