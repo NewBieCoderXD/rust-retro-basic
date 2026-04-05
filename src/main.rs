@@ -1,13 +1,17 @@
+mod code_gen;
 mod parser;
 mod scanner;
 mod token;
-use std::io::SeekFrom;
 use std::path::PathBuf;
+use std::string::ParseError;
 
+use thiserror::Error;
 use tokio::fs::File;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncSeekExt, BufReader};
+use tokio::io::AsyncReadExt;
 
 use clap::Parser;
+
+use crate::code_gen::CodeGenError;
 
 // fn compile(){
 
@@ -66,16 +70,45 @@ async fn process_buffers_and_scan(
     Ok(())
 }
 
-#[tokio::main]
-async fn main() {
-    let args = Args::parse();
+#[derive(Error, Debug)]
+enum CompileError {
+    // #[error("Error during scanning: {0}")]
+    // Scan(),
+    #[error("Error during parsing: {0}")]
+    Parse(parser::ParseError),
+    #[error("Error during code generation: {0}")]
+    CodeGen(code_gen::CodeGenError),
+}
 
+impl From<parser::ParseError> for CompileError {
+    fn from(err: parser::ParseError) -> Self {
+        CompileError::Parse(err)
+    }
+}
+
+impl From<code_gen::CodeGenError> for CompileError {
+    fn from(err: code_gen::CodeGenError) -> Self {
+        CompileError::CodeGen(err)
+    }
+}
+
+async fn compile(input_path: String, output_path: String) -> Result<String, CompileError> {
     let mut state = scanner::ScanState::Start;
     let mut mem = vec![];
     let mut out = vec![];
-    process_buffers_and_scan(PathBuf::from(args.input), &mut state, &mut mem, &mut out)
+    process_buffers_and_scan(PathBuf::from(input_path), &mut state, &mut mem, &mut out)
         .await
         .unwrap();
 
-    println!("{:?}", out);
+    let statements = parser::parse(out)?;
+    let code = code_gen::generate(statements)?;
+
+    return Ok(code);
+}
+
+#[tokio::main]
+async fn main() {
+    let args = Args::parse();
+    let out_code = compile(args.input, args.output).await;
+    println!("{:?}", out_code);
 }

@@ -36,6 +36,9 @@ pub fn scan(
         }
         if char == ' ' || char == '\n' {
             on_finish_term(state, mem, out);
+            if char == '\n'{
+              out.push(token::Token::EndOfLine);
+            }
         }
         match state {
             ScanState::Start => {
@@ -54,6 +57,15 @@ pub fn scan(
                         token::TokenCompare::LessThan
                     };
                     out.push(token::Token::Compare(compare));
+                    *state = ScanState::Start;
+                    mem.clear();
+                } else if char == '+' || char == '-' {
+                    let math_op = if char == '+' {
+                        token::TokenMathOp::Add
+                    } else {
+                        token::TokenMathOp::Sub
+                    };
+                    out.push(token::Token::MathOp(math_op));
                     *state = ScanState::Start;
                     mem.clear();
                 }
