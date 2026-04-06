@@ -3,7 +3,7 @@ use std::iter::Peekable;
 use thiserror::Error;
 
 use crate::{
-    terminal::Terminal,
+    terminal::ExpectedNode,
     token::{self, Token},
 };
 
@@ -58,13 +58,13 @@ pub enum ParseState {
 #[error("Unexpected symbol: `{symbol:?}`, expected `{expected:?}`")]
 pub struct ExpectedSymMismatch {
     symbol: Token,
-    expected: Terminal,
+    expected: ExpectedNode,
 }
 
 #[derive(Error, Debug)]
 #[error("Expected `{expected:?}`")]
 pub struct ExpectMismatch {
-    expected: Terminal,
+    expected: ExpectedNode,
 }
 
 #[derive(Error, Debug)]
@@ -146,7 +146,7 @@ fn parse_exp<'a>(
             } else {
                 return Err(ParseError::UnexpectedSym(ExpectedSymMismatch {
                     symbol: next_tok.clone(),
-                    expected: Terminal::Expression,
+                    expected: ExpectedNode::Expression,
                 }));
             }
         } else {
@@ -182,7 +182,7 @@ fn parse_bool_exp<'a>(
             } else {
                 return Err(ParseError::UnexpectedSym(ExpectedSymMismatch {
                     symbol: next_tok.clone(),
-                    expected: Terminal::Expression,
+                    expected: ExpectedNode::Expression,
                 }));
             }
         } else {
@@ -206,7 +206,7 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<StatementNode>, ParseError> {
             if !matches!(state, ParseState::Start) {
                 return Err(ParseError::UnexpectedSym(ExpectedSymMismatch {
                     symbol: token::Token::EndOfLine,
-                    expected: Terminal::Identifier,
+                    expected: ExpectedNode::Identifier,
                 }));
             }
             iter.next();
@@ -220,7 +220,7 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<StatementNode>, ParseError> {
                 } else {
                     return Err(ParseError::UnexpectedSym(ExpectedSymMismatch {
                         symbol: (*next_tok).clone(),
-                        expected: Terminal::Number,
+                        expected: ExpectedNode::Number,
                     }));
                 }
             }
@@ -254,7 +254,7 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<StatementNode>, ParseError> {
                 if !matches!(next_tok, token::Token::Compare(_)) {
                     return Err(ParseError::UnexpectedSym(ExpectedSymMismatch {
                         symbol: (*next_tok).clone(),
-                        expected: Terminal::Equal,
+                        expected: ExpectedNode::Equal,
                     }));
                 }
                 state = ParseState::AssignmentAfterEqual;
@@ -272,7 +272,7 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<StatementNode>, ParseError> {
                     state = ParseState::Start;
                 } else {
                     return Err(ParseError::ExpectMismatch(ExpectMismatch {
-                        expected: Terminal::Expression,
+                        expected: ExpectedNode::Expression,
                     }));
                 }
             }
@@ -281,7 +281,7 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<StatementNode>, ParseError> {
                 if cond_node.is_none() {
                     println!("gg{:?}",next_tok.clone());
                     return Err(ParseError::ExpectMismatch(ExpectMismatch {
-                        expected: Terminal::BooleanExpression,
+                        expected: ExpectedNode::BooleanExpression,
                     }));
                 }
                 state = ParseState::IfAfterCond;
@@ -320,7 +320,7 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<StatementNode>, ParseError> {
                 } else {
                     return Err(ParseError::UnexpectedSym(ExpectedSymMismatch {
                         symbol: next_tok.clone(),
-                        expected: Terminal::Identifier,
+                        expected: ExpectedNode::Identifier,
                     }));
                 }
             }

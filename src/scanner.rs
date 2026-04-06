@@ -1,6 +1,9 @@
-use thiserror::Error;
+use std::path::PathBuf;
 
-use crate::token;
+use tokio::io::AsyncReadExt;
+use thiserror::Error;
+use tokio::fs::File;
+use crate::{constants::SCAN_BUF_SIZE, token};
 
 #[derive(Debug)]
 pub enum ScanState {
@@ -26,6 +29,8 @@ impl From<std::io::Error> for ScanError {
         ScanError::CannotReadFile(value)
     }
 }
+
+
 
 pub fn on_finish_term(state: &mut ScanState, mem: &mut Vec<char>, out: &mut Vec<token::Token>) {
     match state {
@@ -111,4 +116,58 @@ pub fn scan(
         }
     }
     Ok(out)
+}
+
+
+pub async fn process_buffers_and_scan(
+    path: PathBuf,
+    state: &mut ScanState,
+    mem: &mut Vec<char>,
+) -> Result<Vec<token::Token>, ScanError> {
+    let mut file = File::open(path).await?;
+
+    let mut buf_a = vec![0u8; SCAN_BUF_SIZE];
+    let mut buf_b = vec![0u8; SCAN_BUF_SIZE];
+
+    let n = file.read(&mut buf_a).await?;
+    if n == 0 {
+        return Ok(vec![]);
+    }
+
+    let mut current_size = n;
+
+    let mut current_is_a = true;
+    let mut real_out = vec![];
+
+    loop {
+        if current_size == 0 {
+            break;
+        }
+
+        let active_buf;
+        let next_read_result;
+        if current_is_a {
+            next_read_result = file.read(&mut buf_b);
+            active_buf = &buf_a;
+        } else {
+            next_read_result = file.read(&mut buf_a);
+            active_buf = &buf_b;
+        };
+
+        let out = scan(active_buf, current_size, state, mem)?;
+        real_out.extend(out);
+
+        match next_read_result.await {
+            Ok(new_size) => {
+                current_is_a = !current_is_a;
+                current_size = new_size;
+            } // Swap buffers
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break, // End of file
+            Err(e) => return Err(ScanError::CannotReadFile(e)),
+        }
+    }
+
+    on_finish_term(state, mem, &mut real_out);
+
+    Ok(real_out)
 }

@@ -1,0 +1,77 @@
+@startuml
+skinparam shadowing false
+skinparam BangColor white
+
+header Rust AST Instance Tree
+title Complex Statement Tree (Root: Vec<StatementNode>)
+
+object "Root : Vec" as Root
+
+' --- Statement 1: Assignment ---
+object "Stmt[0] : StatementNode::Assign" as S1 {
+    line = 10
+    target = "A"
+}
+
+object "MultOp : BinaryMathOp" as B_Mult {
+    op = Multiply
+}
+
+object "AddOp : BinaryMathOp" as B_Add {
+    op = Plus
+}
+
+object "Term: 5" as T1 {
+    val = Number(5)
+}
+object "Term: X" as T2 {
+    val = Var("X")
+}
+object "Term: 2" as T3 {
+    val = Number(2)
+}
+
+' --- Statement 2: If Condition ---
+object "Stmt[1] : StatementNode::If" as S2 {
+    line = 20
+    goto_target = 100
+}
+
+object "Comparison : CondNode" as C1 {
+    op = GreaterThan
+}
+
+object "Term: A" as T4 {
+    val = Var("A")
+}
+object "Term: 50" as T5 {
+    val = Number(50)
+}
+
+' --- Statement 3: Print ---
+object "Stmt[2] : StatementNode::Print" as S3 {
+    line = 30
+    message = "Threshold Reached"
+}
+
+' --- Connections (The Tree Structure) ---
+
+Root *-- S1
+Root *-- S2
+Root *-- S3
+
+' Nesting for Statement 1: (5 + X) * 2
+S1 *-- B_Mult : ExpNode
+B_Mult *-- B_Add : left (Box)
+B_Mult *-- T3 : right (Box)
+B_Add *-- T1 : left
+B_Add *-- T2 : right
+
+' Nesting for Statement 2: If A > 50
+S2 *-- C1 : CondNode
+C1 *-- T4 : left (ExpNode)
+C1 *-- T5 : right (ExpNode)
+
+note bottom of B_Add : Recursive ExpNode depth
+note right of S2 : Conditional Branching
+@enduml
