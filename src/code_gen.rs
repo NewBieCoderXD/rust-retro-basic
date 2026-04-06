@@ -31,8 +31,6 @@ enum OpCode {
 pub enum CodeGenError {
     #[error("Invalid identifier: {0}")]
     InvalidIdentifier(String),
-    #[error("Unsupported operation: {0:?}")]
-    InvalidOp(token::TokenCompare),
 }
 
 fn add_line(out: &mut Vec<Vec<u16>>, line: u16) {
@@ -72,15 +70,14 @@ fn add_exp_node(last_out: &mut Vec<u16>, exp: &ExpNode) -> Result<(), CodeGenErr
         ExpNode::Term(parser::Term::Number(num)) => {
             add_const(last_out, *num);
         }
-        ExpNode::Add(lhs, rhs) => {
-            add_exp_node(last_out, lhs.as_ref())?;
-            add_op(last_out, OpCode::Add)?;
-            add_exp_node(last_out, rhs.as_ref())?;
-        }
-        ExpNode::Sub(lhs, rhs) => {
-            add_exp_node(last_out, lhs.as_ref())?;
-            add_op(last_out, OpCode::Sub)?;
-            add_exp_node(last_out, rhs.as_ref())?;
+        ExpNode::BinaryMathOp(bin) => {
+            add_exp_node(last_out, bin.left.as_ref())?;
+            let op = match bin.op {
+                token::TokenMathOp::Add => OpCode::Add,
+                token::TokenMathOp::Sub => OpCode::Sub,
+            };
+            add_op(last_out, op)?;
+            add_exp_node(last_out, bin.right.as_ref())?;
         }
     }
     Ok(())
@@ -101,9 +98,6 @@ fn add_cond_node(last_out: &mut Vec<u16>, cond: &CondNode) -> Result<(), CodeGen
     let op;
     match cond.op {
         token::TokenCompare::Equal => op = OpCode::Equal,
-        token::TokenCompare::MoreThan => {
-            return Err(CodeGenError::InvalidOp(token::TokenCompare::MoreThan));
-        }
         token::TokenCompare::LessThan => op = OpCode::LessThan,
     };
     add_exp_node(last_out, &cond.left)?;

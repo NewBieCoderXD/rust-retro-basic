@@ -2,7 +2,10 @@ use std::iter::Peekable;
 
 use thiserror::Error;
 
-use crate::token::{self, Token, TokenMathOp};
+use crate::{
+    terminal::Terminal,
+    token::{self, Token},
+};
 
 #[derive(Debug)]
 pub enum Term {
@@ -11,9 +14,15 @@ pub enum Term {
 }
 
 #[derive(Debug)]
+pub struct BinaryMathOp {
+    pub op: token::TokenMathOp,
+    pub left: Box<ExpNode>,
+    pub right: Box<ExpNode>,
+}
+
+#[derive(Debug)]
 pub enum ExpNode {
-    Add(Box<ExpNode>, Box<ExpNode>),
-    Sub(Box<ExpNode>, Box<ExpNode>),
+    BinaryMathOp(BinaryMathOp),
     Term(Term),
 }
 
@@ -47,15 +56,27 @@ pub enum ParseState {
 
 #[derive(Error, Debug)]
 #[error("Unexpected symbol: `{symbol:?}`, expected `{expected:?}`")]
-pub struct ExpectMismatch {
+pub struct ExpectedSymMismatch {
     symbol: Token,
-    expected: Token,
+    expected: Terminal,
+}
+
+#[derive(Error, Debug)]
+#[error("Expected `{expected:?}`")]
+pub struct ExpectMismatch {
+    expected: Terminal,
 }
 
 #[derive(Error, Debug)]
 pub enum ParseError {
     #[error("{0}")]
-    Unexpected(ExpectMismatch),
+    UnexpectedSym(ExpectedSymMismatch),
+    #[error("{0}")]
+    ExpectMismatch(ExpectMismatch),
+    #[error("Expected line number, found {0:?}")]
+    ExpectLineNumber(Token),
+    #[error("Unexpected end of input")]
+    UnexpectedEndOfInput,
 }
 
 fn parse_iden<'a>(
@@ -103,7 +124,7 @@ fn parse_term<'a>(
 fn parse_exp<'a>(
     next_tok: &Token,
     iter: &mut Peekable<impl Iterator<Item = &'a token::Token>>,
-) -> Option<ExpNode> {
+) -> Result<Option<ExpNode>,ParseError> {
     let lhs = parse_term(next_tok, iter);
     if let Some(lhs) = lhs {
         let next_tok = iter.peek();
@@ -112,37 +133,34 @@ fn parse_exp<'a>(
 
             let next_tok = iter.peek();
             if next_tok.is_none() {
-                return None;
+                return Err(ParseError::UnexpectedEndOfInput);
             }
-            let next_tok = next_tok.unwrap();
+            let next_tok = *next_tok.unwrap();
             let rhs = parse_term(next_tok, iter);
             if let Some(rhs) = rhs {
-                return match math_op {
-                    TokenMathOp::Add => Some(ExpNode::Add(
-                        Box::new(ExpNode::Term(lhs)),
-                        Box::new(ExpNode::Term(rhs)),
-                    )),
-                    TokenMathOp::Sub => Some(ExpNode::Sub(
-                        Box::new(ExpNode::Term(lhs)),
-                        Box::new(ExpNode::Term(rhs)),
-                    )),
-                };
+                return Ok(Some(ExpNode::BinaryMathOp(BinaryMathOp {
+                    op: math_op.clone(),
+                    left: Box::new(ExpNode::Term(lhs)),
+                    right: Box::new(ExpNode::Term(rhs)),
+                })));
             } else {
-                //Error
-                return None;
+                return Err(ParseError::UnexpectedSym(ExpectedSymMismatch {
+                    symbol: next_tok.clone(),
+                    expected: Terminal::Expression,
+                }));
             }
         } else {
-            return Some(ExpNode::Term(lhs));
+            return Ok(Some(ExpNode::Term(lhs)));
         }
     } else {
-        return None;
+        return Ok(None);
     }
 }
 
 fn parse_bool_exp<'a>(
     next_tok: &Token,
     iter: &mut Peekable<impl Iterator<Item = &'a token::Token>>,
-) -> Option<CondNode> {
+) -> Result<Option<CondNode>, ParseError> {
     let lhs = parse_term(next_tok, iter);
     if let Some(lhs) = lhs {
         let next_tok = iter.peek();
@@ -151,25 +169,27 @@ fn parse_bool_exp<'a>(
 
             let next_tok = iter.peek();
             if next_tok.is_none() {
-                return None;
+                return Err(ParseError::UnexpectedEndOfInput);
             }
-            let next_tok = next_tok.unwrap();
+            let next_tok = *next_tok.unwrap();
             let rhs = parse_term(next_tok, iter);
             if let Some(rhs) = rhs {
-                return Some(CondNode {
+                return Ok(Some(CondNode {
                     op: comp.clone(),
                     left: ExpNode::Term(lhs),
                     right: ExpNode::Term(rhs),
-                });
+                }));
             } else {
-                //Error
-                return None;
+                return Err(ParseError::UnexpectedSym(ExpectedSymMismatch {
+                    symbol: next_tok.clone(),
+                    expected: Terminal::Expression,
+                }));
             }
         } else {
-            return None;
+            return Ok(None);
         }
     } else {
-        return None;
+        return Ok(None);
     }
 }
 
@@ -184,10 +204,9 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<StatementNode>, ParseError> {
     while let Some(&next_tok) = iter.peek() {
         if matches!(next_tok, token::Token::EndOfLine) {
             if !matches!(state, ParseState::Start) {
-                println!("{:?}", state);
-                return Err(ParseError::Unexpected(ExpectMismatch {
+                return Err(ParseError::UnexpectedSym(ExpectedSymMismatch {
                     symbol: token::Token::EndOfLine,
-                    expected: Token::Iden(String::new()),
+                    expected: Terminal::Identifier,
                 }));
             }
             iter.next();
@@ -199,9 +218,9 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<StatementNode>, ParseError> {
                     current_line_num = Some(num);
                     state = ParseState::AfterLineNum;
                 } else {
-                    return Err(ParseError::Unexpected(ExpectMismatch {
+                    return Err(ParseError::UnexpectedSym(ExpectedSymMismatch {
                         symbol: (*next_tok).clone(),
-                        expected: Token::Number(0),
+                        expected: Terminal::Number,
                     }));
                 }
             }
@@ -218,7 +237,10 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<StatementNode>, ParseError> {
                             token::ReservedWord::Print => {
                                 state = ParseState::AfterPrint;
                             }
-                            token::ReservedWord::Stop => root.push(StatementNode::Stop(current_line_num.unwrap())),
+                            token::ReservedWord::Stop => {
+                                root.push(StatementNode::Stop(current_line_num.unwrap()));
+                                state=ParseState::Start;
+                            }
                         }
                     } else {
                         iden_name = Some(name.clone());
@@ -230,15 +252,15 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<StatementNode>, ParseError> {
             ParseState::AssignmentAfterIden => {
                 iter.next();
                 if !matches!(next_tok, token::Token::Compare(_)) {
-                    return Err(ParseError::Unexpected(ExpectMismatch {
+                    return Err(ParseError::UnexpectedSym(ExpectedSymMismatch {
                         symbol: (*next_tok).clone(),
-                        expected: Token::Compare(token::TokenCompare::Equal),
+                        expected: Terminal::Equal,
                     }));
                 }
                 state = ParseState::AssignmentAfterEqual;
             }
             ParseState::AssignmentAfterEqual => {
-                let exp = parse_exp(next_tok, &mut iter);
+                let exp = parse_exp(next_tok, &mut iter)?;
                 if let Some(exp) = exp {
                     root.push(StatementNode::Assign(
                         current_line_num.unwrap(),
@@ -249,13 +271,18 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<StatementNode>, ParseError> {
                     iden_name = None;
                     state = ParseState::Start;
                 } else {
-                    //Error
+                    return Err(ParseError::ExpectMismatch(ExpectMismatch {
+                        expected: Terminal::Expression,
+                    }));
                 }
             }
             ParseState::AfterIf => {
-                cond_node = parse_bool_exp(next_tok, &mut iter);
+                cond_node = parse_bool_exp(next_tok, &mut iter)?;
                 if cond_node.is_none() {
-                    //Error
+                    println!("gg{:?}",next_tok.clone());
+                    return Err(ParseError::ExpectMismatch(ExpectMismatch {
+                        expected: Terminal::BooleanExpression,
+                    }));
                 }
                 state = ParseState::IfAfterCond;
             }
@@ -270,6 +297,8 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<StatementNode>, ParseError> {
                     current_line_num = None;
                     cond_node = None;
                     state = ParseState::Start;
+                } else {
+                    return Err(ParseError::ExpectLineNumber(next_tok.clone()));
                 }
             }
             ParseState::AfterGoto => {
@@ -280,7 +309,7 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<StatementNode>, ParseError> {
                     state = ParseState::Start;
                     iter.next();
                 } else {
-                    //Error
+                    return Err(ParseError::ExpectLineNumber(next_tok.clone()));
                 }
             }
             ParseState::AfterPrint => {
@@ -289,7 +318,10 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<StatementNode>, ParseError> {
                     root.push(StatementNode::Print(current_line_num.unwrap(), iden));
                     state = ParseState::Start;
                 } else {
-                    //Error
+                    return Err(ParseError::UnexpectedSym(ExpectedSymMismatch {
+                        symbol: next_tok.clone(),
+                        expected: Terminal::Identifier,
+                    }));
                 }
             }
         };

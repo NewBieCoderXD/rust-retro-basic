@@ -4,7 +4,6 @@ use strum_macros::{Display, EnumString};
 pub enum TokenCompare {
     Equal,
     LessThan,
-    MoreThan,
 }
 
 #[derive(Debug,Clone)]
