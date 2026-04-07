@@ -59,7 +59,7 @@ async fn compile(input_path: String) -> Result<String, CompileError> {
     return Ok(code);
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     let start = std::time::Instant::now();
     let args = Args::parse();
